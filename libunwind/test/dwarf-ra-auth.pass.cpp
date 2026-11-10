@@ -8,6 +8,11 @@
 // the Mach-O header (see the ABI probe, checks 29-32).
 //
 //   cc -std=c++11 -march=armv8.3-a -D_LIBUNWIND_IS_NATIVE_ONLY -I../src -I../include dwarf-ra-auth.pass.cpp
+//
+// Built without -D_LIBUNWIND_IS_NATIVE_ONLY all targets are enabled, so the
+// parser's register table (287) is larger than arm64's register file (95) and
+// the step-side bound can be tested; the negate_ra_state cases are native-only.
+//   cc -std=c++11 -march=armv8.3-a -I../src -I../include dwarf-ra-auth.pass.cpp
 
 #include <assert.h>
 #include <stdint.h>
@@ -26,6 +31,8 @@ LocalAddressSpace LocalAddressSpace::sThisAddressSpace;
 extern "C" bool logDWARF() { return false; }   // normally in libunwind.cpp
 
 typedef DwarfInstructions<LocalAddressSpace, Registers_arm64> Step;
+typedef CFI_Parser<LocalAddressSpace>::FDE_Info FDE_Info;
+typedef CFI_Parser<LocalAddressSpace>::CIE_Info CIE_Info;
 
 static uintptr_t sign_ia(uintptr_t p, uintptr_t m) { __asm__("pacia %0, %1" : "+r"(p) : "r"(m)); return p; }
 static uintptr_t sign_ib(uintptr_t p, uintptr_t m) { __asm__("pacib %0, %1" : "+r"(p) : "r"(m)); return p; }
@@ -43,16 +50,17 @@ struct Buf {
 
 // A CIE (augmentation `aug`, return address register `ra`) and an FDE whose
 // instructions are def_cfa fp+16 followed by `rule`. Returns the FDE address.
-static uintptr_t build(Buf &buf, const char *aug, uint8_t ra, const uint8_t *rule,
+static uintptr_t build(Buf &buf, const char *aug, unsigned ra, const uint8_t *rule,
                        size_t ruleLen) {
   size_t cie = buf.n;
   buf.u32(0);        // length, patched below
   buf.u32(0);        // CIE id
-  buf.u8(1);         // version
+  buf.u8(ra > 127 ? 3 : 1);   // version 3 carries the register as a ULEB128
   buf.str(aug);
   buf.u8(4);         // code alignment
   buf.u8(0x78);      // data alignment -8
-  buf.u8(ra);        // return address register
+  if (ra > 127) { buf.u8((uint8_t)(0x80 | (ra & 0x7f))); buf.u8((uint8_t)(ra >> 7)); }
+  else buf.u8((uint8_t)ra);  // return address register
   buf.u8(1);         // augmentation length
   buf.u8(0);         // 'R': absolute pointers
   const uint8_t init[] = {0x0c, 31, 0};   // def_cfa sp, 0
@@ -176,7 +184,9 @@ int main() {
     assert(WIFSIGNALED(st) && WTERMSIG(st) == SIGABRT);
   }
 
+#if defined(_LIBUNWIND_IS_NATIVE_ONLY)
   // negate_ra_state: authenticated without the image flag, key from the CIE.
+  // (A multi-target build refuses it: UNW_ECROSSRASIGNING.)
   {
     const uint8_t negate[] = {0x9e, 1, 0x2d};
     Buf a; uintptr_t fa = build(a, "zR", 30, negate, sizeof negate);
@@ -186,14 +196,26 @@ int main() {
     assert(step(fb, 0, sign_ib(plain, CFA), 0, &ip) == UNW_STEP_SUCCESS && ip == plain);
     assert(rejected([&] { uint64_t r; step(fb, 0, sign_ia(plain, CFA), 0, &r); return r != plain; }));
   }
+#endif
 
-  // Malformed CIE: a return address register beyond the register table is
-  // rejected, not used to index it.
+  // Malformed CIE: a return address column that the parser's table, a byte or
+  // the target's register file does not have is rejected, not used to index
+  // anything. Version 3 CIEs carry it as a ULEB128, so values above 255 exist.
+  // The parser rejects what is outside its table (kMaxRegisterNumber: 95 when
+  // only arm64 is built, 287 in a multi-target build) or a byte; the step
+  // rejects what is outside arm64's register file (95) but inside the table,
+  // which only exists in a multi-target build.
   {
     const uint8_t inCFA2[] = {0x9e, 1};
-    const uint8_t badRa[] = {96, 200};
-    for (uint8_t ra : badRa) {
+    const unsigned last = (unsigned)Registers_arm64::lastDwarfRegNum();
+    const unsigned table = (unsigned)CFI_Parser<LocalAddressSpace>::kMaxRegisterNumber;
+    const unsigned badRa[] = {last + 1, 255, 260, table + 1, 300};
+    for (unsigned ra : badRa) {
       Buf buf; uintptr_t fde = build(buf, "zR", ra, inCFA2, sizeof inCFA2);
+      FDE_Info fdeInfo; CIE_Info cieInfo;
+      const bool parsed = CFI_Parser<LocalAddressSpace>::decodeFDE(
+          LocalAddressSpace::sThisAddressSpace, fde, &fdeInfo, &cieInfo) == NULL;
+      assert(parsed == (ra <= table && ra <= 255));
       assert(childOk([&] {
         uint64_t r;
         return step(fde, _LIBUNWIND_RA_SIGNED_IB, 0, 0, &r) == UNW_EBADFRAME;
