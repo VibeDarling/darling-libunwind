@@ -107,8 +107,10 @@ _LIBUNWIND_EXPORT void *_Unwind_FindEnclosingFunction(void *pc) {
 /// returns anything other than _URC_NO_REASON, then walk is terminated.
 _LIBUNWIND_EXPORT _Unwind_Reason_Code
 _Unwind_Backtrace(_Unwind_Trace_Fn callback, void *ref) {
+#if defined(_LIBUNWIND_PTRAUTH_ENABLED)
   // An arm64e caller passes a signed trace function.
-  callback = (_Unwind_Trace_Fn)__libunwind_auth_function_ptr((uintptr_t)callback);
+  callback = __libunwind_auth_fn(_Unwind_Trace_Fn, callback);
+#endif
   unw_cursor_t cursor;
   unw_context_t uc;
   __unw_getcontext(&uc);

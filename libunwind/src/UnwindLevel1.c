@@ -248,8 +248,10 @@ static _Unwind_Reason_Code
 unwind_phase2_forced(unw_context_t *uc, unw_cursor_t *cursor,
                      _Unwind_Exception *exception_object,
                      _Unwind_Stop_Fn stop, void *stop_parameter) {
+#if defined(_LIBUNWIND_PTRAUTH_ENABLED)
   // An arm64e caller passes a signed stop function.
-  stop = (_Unwind_Stop_Fn)__libunwind_auth_function_ptr((uintptr_t)stop);
+  stop = __libunwind_auth_fn(_Unwind_Stop_Fn, stop);
+#endif
   __unw_init_local(cursor, uc);
 
   // Walk each frame until we reach where search phase said to stop
@@ -469,13 +471,11 @@ _LIBUNWIND_EXPORT void
 _Unwind_DeleteException(_Unwind_Exception *exception_object) {
   _LIBUNWIND_TRACE_API("_Unwind_DeleteException(ex_obj=%p)",
                        (void *)exception_object);
-  if (exception_object->exception_cleanup != NULL) {
-    // An arm64e __cxa_throw stores a signed cleanup pointer.
-    __typeof__(exception_object->exception_cleanup) cleanup =
-        (__typeof__(cleanup))__libunwind_auth_function_ptr(
-            (uintptr_t)exception_object->exception_cleanup);
-    (*cleanup)(_URC_FOREIGN_EXCEPTION_CAUGHT, exception_object);
-  }
+  // An arm64e __cxa_throw stores a signed cleanup pointer.
+  if (exception_object->exception_cleanup != NULL)
+    (*__libunwind_auth_fn(__typeof__(exception_object->exception_cleanup),
+                          exception_object->exception_cleanup))(
+        _URC_FOREIGN_EXCEPTION_CAUGHT, exception_object);
 }
 
 /// Called by personality handler during phase 2 to get register values.

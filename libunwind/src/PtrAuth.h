@@ -44,6 +44,9 @@
 #define _LIBUNWIND_RA_SIGNED_MASK 0x300u
 
 #if defined(__aarch64__) && defined(__LP64__)
+// Defined where the helpers below emit hint instructions (LP64 arm64). Everywhere
+// else call sites are compiled out so the object code is unchanged.
+#define _LIBUNWIND_PTRAUTH_ENABLED 1
 #define _LIBUNWIND_PTRAUTH_INLINE static inline __attribute__((always_inline))
 
 // xpaclri is encoded in the hint space (hint #7); it operates on x30.
@@ -97,10 +100,10 @@ _LIBUNWIND_PTRAUTH_INLINE uintptr_t __libunwind_auth_ib(uintptr_t ptr,
 _LIBUNWIND_PTRAUTH_INLINE uintptr_t __libunwind_auth_function_ptr(uintptr_t ptr) {
   return (ptr && __unw_is_arm64e_code(ptr)) ? __libunwind_auth_ia(ptr, 0) : ptr;
 }
+#define __libunwind_auth_fn(type, ptr)                                         \
+  ((type)__libunwind_auth_function_ptr((uintptr_t)(ptr)))
 #else
-_LIBUNWIND_PTRAUTH_INLINE uintptr_t __libunwind_auth_function_ptr(uintptr_t ptr) {
-  return ptr;
-}
+#define __libunwind_auth_fn(type, ptr) (ptr)
 #endif
 
 #ifdef __cplusplus
