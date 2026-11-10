@@ -23,7 +23,9 @@
 //     which is the CFA of its frame;
 //   function pointer (struct field, callback argument): IA key, discriminator 0;
 //   GOT slot (personality): IA key, address diversity, discriminator 0, so the
-//     modifier is the slot address.
+//     modifier is the slot address;
+//   landing pad an arm64e personality passes to _Unwind_SetIP: IB key,
+//     modifier = the SP of the frame that is resumed.
 // __libunwind_strip_code_ptr removes a signature without checking it. It is
 // used only to look up which image a pointer belongs to, never for a value
 // that is called or installed as a PC.
@@ -102,6 +104,19 @@ _LIBUNWIND_PTRAUTH_INLINE uintptr_t __libunwind_auth_function_ptr(uintptr_t ptr)
 }
 #define __libunwind_auth_fn(type, ptr)                                         \
   ((type)__libunwind_auth_function_ptr((uintptr_t)(ptr)))
+
+// The landing pad a personality hands to _Unwind_SetIP. A personality in an
+// arm64e image signs it as a return address (IB key, modifier = the SP of the
+// frame that is resumed); a plain personality passes a plain address, which must
+// not be authenticated. The signer is the personality, so `personality` decides,
+// not the frame it unwinds. A pad that fails to authenticate stays poisoned and
+// faults when resumed; it is never stripped.
+_LIBUNWIND_PTRAUTH_INLINE uintptr_t __libunwind_auth_landing_pad(
+    uintptr_t pad, uintptr_t sp, uintptr_t personality) {
+  return (personality && __unw_is_arm64e_code(personality))
+             ? __libunwind_auth_ib(pad, sp)
+             : pad;
+}
 #else
 #define __libunwind_auth_fn(type, ptr) (ptr)
 #endif

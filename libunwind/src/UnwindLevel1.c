@@ -519,6 +519,20 @@ _LIBUNWIND_EXPORT void _Unwind_SetIP(struct _Unwind_Context *context,
   _LIBUNWIND_TRACE_API("_Unwind_SetIP(context=%p, value=0x%0" PRIxPTR ")",
                        (void *)context, value);
   unw_cursor_t *cursor = (unw_cursor_t *)context;
+#if defined(_LIBUNWIND_PTRAUTH_ENABLED)
+  // The running personality is the cursor's handler (already authenticated by
+  // the step); a tail call would hide it from the caller's return address. The
+  // modifier is the SP the personality read with _Unwind_GetGR: the cursor's SP,
+  // before __unw_set_reg adjusts it for DW_CFA_GNU_args_size.
+  {
+    unw_proc_info_t info;
+    unw_word_t sp;
+    if (__unw_get_proc_info(cursor, &info) == UNW_ESUCCESS && info.handler &&
+        __unw_get_reg(cursor, UNW_REG_SP, &sp) == UNW_ESUCCESS)
+      value = __libunwind_auth_landing_pad(value, (uintptr_t)sp,
+                                           (uintptr_t)info.handler);
+  }
+#endif
   __unw_set_reg(cursor, UNW_REG_IP, value);
 }
 
