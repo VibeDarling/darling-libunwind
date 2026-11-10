@@ -160,6 +160,10 @@ int DwarfInstructions<A, R>::stepWithDwarf(A &addressSpace, pint_t pc,
   CIE_Info cieInfo;
   if (CFI_Parser<A>::decodeFDE(addressSpace, fdeStart, &fdeInfo,
                                &cieInfo) == NULL) {
+    // The return address column must exist in this target's register file.
+    // Checked at run time, before anything indexes a table with it.
+    if (static_cast<int>(cieInfo.returnAddressRegister) > R::lastDwarfRegNum())
+      return UNW_EBADFRAME;
     PrologInfo prolog;
     if (CFI_Parser<A>::parseFDEInstructions(addressSpace, fdeInfo, cieInfo, pc,
                                             R::getArch(), &prolog)) {
@@ -172,8 +176,6 @@ int DwarfInstructions<A, R>::stepWithDwarf(A &addressSpace, pint_t pc,
       const int lastReg = R::lastDwarfRegNum();
       assert(static_cast<int>(CFI_Parser<A>::kMaxRegisterNumber) >= lastReg &&
              "register range too large");
-      assert(lastReg >= (int)cieInfo.returnAddressRegister &&
-             "register range does not contain return address register");
       for (int i = 0; i <= lastReg; ++i) {
         if (prolog.savedRegisters[i].location !=
             CFI_Parser<A>::kRegisterUnused) {
@@ -214,9 +216,6 @@ int DwarfInstructions<A, R>::stepWithDwarf(A &addressSpace, pint_t pc,
       const unw_word_t imageFlags = procInfoFlags & _LIBUNWIND_RA_SIGNED_MASK;
       procInfoFlags &= ~_LIBUNWIND_RA_SIGNED_MASK;
       if (R::getArch() == REGISTERS_ARM64) {
-        // parseCIE rejects this already; the table is indexed with it below.
-        if (cieInfo.returnAddressRegister > CFI_Parser<A>::kMaxRegisterNumber)
-          return UNW_EBADREG;
         const typename CFI_Parser<A>::RegisterLocation &raLoc =
             prolog.savedRegisters[cieInfo.returnAddressRegister];
         if (prolog.savedRegisters[UNW_ARM64_RA_SIGN_STATE].value) {
