@@ -7,8 +7,8 @@
 // helpers are the identity and only that is checked. (A wrong-modifier case is
 // left to the guest checks: with FPAC it traps instead of returning.)
 //
-//   cc -march=armv8.3-a -I../src ptrauth.pass.cpp && ./a.out   (arm64 host)
-//   cc -I../src ptrauth.pass.cpp && ./a.out                    (other hosts)
+//   cc -march=armv8.3-a -I../src -I../include ptrauth.pass.cpp && ./a.out   (arm64 host)
+//   cc -I../src -I../include ptrauth.pass.cpp && ./a.out                    (other hosts)
 
 #include <assert.h>
 #include <stdint.h>

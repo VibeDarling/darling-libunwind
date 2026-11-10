@@ -173,6 +173,17 @@ _LIBUNWIND_HIDDEN int __unw_set_fpreg(unw_cursor_t *cursor, unw_regnum_t regNum,
 _LIBUNWIND_WEAK_ALIAS(__unw_set_fpreg, unw_set_fpreg)
 
 /// Move cursor to next frame.
+/// Is `addr` (possibly signed) code in an arm64e image? Plain arm64 code never
+/// signs the pointers it hands out, so callers authenticate only when it is.
+_LIBUNWIND_HIDDEN int __unw_is_arm64e_code(uintptr_t addr) {
+  UnwindInfoSections sects;
+  if (!LocalAddressSpace::sThisAddressSpace.findUnwindSections(
+          __libunwind_strip_code_ptr(addr), sects))
+    return 0;
+  return __libunwind_image_is_arm64e(LocalAddressSpace::sThisAddressSpace,
+                                     sects.dso_base);
+}
+
 _LIBUNWIND_HIDDEN int __unw_step(unw_cursor_t *cursor) {
   _LIBUNWIND_TRACE_API("__unw_step(cursor=%p)", static_cast<void *>(cursor));
   AbstractUnwindCursor *co = (AbstractUnwindCursor *)cursor;

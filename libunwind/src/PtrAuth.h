@@ -35,6 +35,8 @@
 
 #include <stdint.h>
 
+#include "libunwind_ext.h"
+
 // unw_proc_info_t::flags bits set for a frame whose saved return address is
 // signed (the field is otherwise unused for arm64).
 #define _LIBUNWIND_RA_SIGNED_IA 0x100u
@@ -83,6 +85,20 @@ _LIBUNWIND_PTRAUTH_INLINE uintptr_t __libunwind_auth_ia(uintptr_t ptr,
 _LIBUNWIND_PTRAUTH_INLINE uintptr_t __libunwind_auth_ib(uintptr_t ptr,
                                                        uintptr_t modifier) {
   (void)modifier;
+  return ptr;
+}
+#endif
+
+// A code pointer an arm64e caller hands over (a callback, a struct field): IA
+// key, discriminator 0. Plain callers hand it over unsigned, so it is
+// authenticated only when it points into an arm64e image. The strip is used
+// only for that lookup; the pointer that is called is the authenticated one.
+#if defined(__aarch64__) && defined(__LP64__)
+_LIBUNWIND_PTRAUTH_INLINE uintptr_t __libunwind_auth_function_ptr(uintptr_t ptr) {
+  return (ptr && __unw_is_arm64e_code(ptr)) ? __libunwind_auth_ia(ptr, 0) : ptr;
+}
+#else
+_LIBUNWIND_PTRAUTH_INLINE uintptr_t __libunwind_auth_function_ptr(uintptr_t ptr) {
   return ptr;
 }
 #endif

@@ -19,6 +19,7 @@
 #include "config.h"
 #include "libunwind_ext.h"
 #include "libunwind.h"
+#include "PtrAuth.h"
 #include "Unwind-EHABI.h"
 #include "unwind.h"
 
@@ -106,6 +107,8 @@ _LIBUNWIND_EXPORT void *_Unwind_FindEnclosingFunction(void *pc) {
 /// returns anything other than _URC_NO_REASON, then walk is terminated.
 _LIBUNWIND_EXPORT _Unwind_Reason_Code
 _Unwind_Backtrace(_Unwind_Trace_Fn callback, void *ref) {
+  // An arm64e caller passes a signed trace function.
+  callback = (_Unwind_Trace_Fn)__libunwind_auth_function_ptr((uintptr_t)callback);
   unw_cursor_t cursor;
   unw_context_t uc;
   __unw_getcontext(&uc);
