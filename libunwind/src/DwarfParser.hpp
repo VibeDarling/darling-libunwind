@@ -45,6 +45,7 @@ public:
     uint8_t   personalityEncoding;
     uint8_t   personalityOffsetInCIE;
     pint_t    personality;
+    pint_t    personalitySlot; // address the personality was loaded from, or 0
     uint32_t  codeAlignFactor;
     int       dataAlignFactor;
     bool      isSignalFrame;
@@ -297,6 +298,7 @@ const char *CFI_Parser<A>::parseCIE(A &addressSpace, pint_t cie,
   cieInfo->lsdaEncoding = DW_EH_PE_omit;
   cieInfo->personalityEncoding = 0;
   cieInfo->personalityOffsetInCIE = 0;
+  cieInfo->personalitySlot = 0;
   cieInfo->personality = 0;
   cieInfo->codeAlignFactor = 0;
   cieInfo->dataAlignFactor = 0;
@@ -359,6 +361,8 @@ const char *CFI_Parser<A>::parseCIE(A &addressSpace, pint_t cie,
         cieInfo->personality = addressSpace
             .getEncodedP(p, cieContentEnd, cieInfo->personalityEncoding,
                          /*datarelBase=*/0, &resultAddr);
+        if (cieInfo->personalityEncoding & DW_EH_PE_indirect)
+          cieInfo->personalitySlot = resultAddr;
         break;
       case 'L':
         cieInfo->lsdaEncoding = addressSpace.get8(p);

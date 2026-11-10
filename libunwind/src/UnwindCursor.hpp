@@ -1520,6 +1520,13 @@ bool UnwindCursor<A, R>::getInfoFromFdeCie(
     _info.end_ip            = fdeInfo.pcEnd;
     _info.lsda              = fdeInfo.lsda;
     _info.handler           = cieInfo.personality;
+    // Same GOT slot scheme as in the compact path (see there). A personality
+    // that is not read through a slot has an unknown scheme and is left as is.
+    if (_info.handler && cieInfo.personalitySlot && dso_base &&
+        R::getArch() == REGISTERS_ARM64 &&
+        __libunwind_image_is_arm64e(_addressSpace, dso_base))
+      _info.handler =
+          __libunwind_auth_ia(_info.handler, cieInfo.personalitySlot);
     // Some frameless functions need SP altered when resuming in function, so
     // propagate spExtraArgSize.
     _info.gp                = prolog.spExtraArgSize;
@@ -1825,6 +1832,11 @@ bool UnwindCursor<A, R>::getInfoFromCompactEncodingSection(pint_t pc,
         personalityIndex * sizeof(uint32_t));
     pint_t personalityPointer = sects.dso_base + (pint_t)personalityDelta;
     personality = _addressSpace.getP(personalityPointer);
+    // An arm64e image signs its GOT slots: IA key, address diversity,
+    // discriminator 0, so the modifier is the slot address.
+    if (personality && R::getArch() == REGISTERS_ARM64 &&
+        __libunwind_image_is_arm64e(_addressSpace, sects.dso_base))
+      personality = __libunwind_auth_ia(personality, personalityPointer);
     if (log)
       fprintf(stderr, "getInfoFromCompactEncodingSection(pc=0x%llX), "
                       "personalityDelta=0x%08X, personality=0x%08llX\n",
