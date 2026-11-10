@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// REQUIRES: (target=aarch64{{.*}} || target=arm64{{.*}}) && !windows
+// REQUIRES: linux && aarch64
 // ADDITIONAL_COMPILE_FLAGS: -march=armv8.3-a
 
 // Host test of _Unwind_SetIP, the production function from UnwindLevel1.c linked
@@ -12,13 +12,19 @@
 // (__unw_is_arm64e_code, true for one function) are fakes. What stays guest-only:
 // the cursor holding the authenticated handler and the real image lookup, and
 // the whole throw path (ABI probe checks 03-10, 23, 28 on an arm64e libc++abi).
-// Needs pointer authentication. On arm64/LP64 a build without
-// __ARM_FEATURE_PAUTH is rejected at compile time, so a misconfigured CI cannot
-// stay green; on other hosts the test does nothing. Lit runs this test only on
-// non-Windows arm64 targets (it uses POSIX fork/waitpid) and passes
-// -march=armv8.3-a through ADDITIONAL_COMPILE_FLAGS, which the libcxx test
-// format appends to %{compile_flags}; the same flag is required for the manual
-// build below.
+// Needs pointer authentication. Lit selects the test only under "linux &&
+// aarch64": both features come from the compiler macros of the configured
+// target (a native build leaves config.target_triple empty, so a target= gate
+// would silently disable it), and libunwind's test config adds "aarch64" after
+// the libcxx parameters are applied, so it follows the flags the suite compiles
+// with. The file is empty unless built for Linux arm64: the runtime probe reads
+// getauxval(AT_HWCAP) and tests bit 30, HWCAP_PACA, which is Linux's arm64 ABI
+// (FreeBSD also has getauxval, with different bits). On arm64/LP64 Linux a
+// build without __ARM_FEATURE_PAUTH is rejected at compile time, so a
+// misconfigured arm64 job cannot stay green; the HWCAP check then skips
+// hardware without pointer authentication. ADDITIONAL_COMPILE_FLAGS passes
+// -march=armv8.3-a, which the libcxx test format appends to %{compile_flags};
+// the same flag is required for the manual build below.
 //
 //   cc -march=armv8.3-a -fno-stack-protector -D_LIBUNWIND_IS_NATIVE_ONLY -I../src -I../include -c ../src/UnwindLevel1.c -o setip-auth-l1.o
 //   c++ -std=c++11 -march=armv8.3-a -D_LIBUNWIND_IS_NATIVE_ONLY -I../src -I../include setip-auth.pass.cpp setip-auth-l1.o
@@ -33,7 +39,7 @@
 #include "libunwind.h"
 #include "unwind.h"
 
-#if defined(__aarch64__) && defined(__LP64__)
+#if defined(__aarch64__) && defined(__LP64__) && defined(__linux__)
 #if !defined(__ARM_FEATURE_PAUTH)
 #error "setip-auth.pass.cpp needs pointer authentication: build with -march=armv8.3-a or newer"
 #endif

@@ -8,6 +8,7 @@
 import os
 import sys
 
+import libcxx.test.features
 from libcxx.test.config import Configuration as LibcxxConfiguration
 
 
@@ -37,6 +38,14 @@ class Configuration(LibcxxConfiguration):
         super(Configuration, self).configure_features()
         if self.get_lit_bool('arm_ehabi', False):
             self.config.available_features.add('libunwind-arm-ehabi')
+
+    def configure(self):
+        super(Configuration, self).configure()
+        # The architecture the suite compiles for, not the host's: compilerMacros
+        # runs %{cxx} with the flags the parameters have just applied, while
+        # config.target_triple is empty on a native build.
+        if '__aarch64__' in libcxx.test.features.compilerMacros(self.config):
+            self.config.available_features.add('aarch64')
 
     def configure_compile_flags(self):
         self.cxx.compile_flags += ['-DLIBUNWIND_NO_TIMER']
