@@ -45,6 +45,9 @@ public:
     uint8_t   personalityEncoding;
     uint8_t   personalityOffsetInCIE;
     pint_t    personality;
+#if defined(_LIBUNWIND_TARGET_AARCH64)
+    pint_t    personalitySlot; // address the personality was loaded from, or 0
+#endif
     uint32_t  codeAlignFactor;
     int       dataAlignFactor;
     bool      isSignalFrame;
@@ -297,6 +300,9 @@ const char *CFI_Parser<A>::parseCIE(A &addressSpace, pint_t cie,
   cieInfo->lsdaEncoding = DW_EH_PE_omit;
   cieInfo->personalityEncoding = 0;
   cieInfo->personalityOffsetInCIE = 0;
+#if defined(_LIBUNWIND_TARGET_AARCH64)
+  cieInfo->personalitySlot = 0;
+#endif
   cieInfo->personality = 0;
   cieInfo->codeAlignFactor = 0;
   cieInfo->dataAlignFactor = 0;
@@ -339,7 +345,11 @@ const char *CFI_Parser<A>::parseCIE(A &addressSpace, pint_t cie,
   // parse return address register
   uint64_t raReg = (version == 1) ? addressSpace.get8(p++)
                                   : addressSpace.getULEB128(p, cieContentEnd);
-  assert(raReg < 255 && "return address register too large");
+  // Checked at run time (an assert compiles out): the value indexes the
+  // saved-register table and is stored in a byte. The step checks it against
+  // the target's register file too.
+  if (raReg > kMaxRegisterNumber || raReg > 0xff)
+    return "return address register out of range";
   cieInfo->returnAddressRegister = (uint8_t)raReg;
   // parse augmentation data based on augmentation string
   const char *result = NULL;
@@ -359,6 +369,10 @@ const char *CFI_Parser<A>::parseCIE(A &addressSpace, pint_t cie,
         cieInfo->personality = addressSpace
             .getEncodedP(p, cieContentEnd, cieInfo->personalityEncoding,
                          /*datarelBase=*/0, &resultAddr);
+#if defined(_LIBUNWIND_TARGET_AARCH64)
+        if (cieInfo->personalityEncoding & DW_EH_PE_indirect)
+          cieInfo->personalitySlot = resultAddr;
+#endif
         break;
       case 'L':
         cieInfo->lsdaEncoding = addressSpace.get8(p);

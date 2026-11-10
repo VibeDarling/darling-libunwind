@@ -28,6 +28,7 @@
 #include "config.h"
 #include "libunwind.h"
 #include "libunwind_ext.h"
+#include "PtrAuth.h"
 #include "unwind.h"
 
 
@@ -247,6 +248,10 @@ static _Unwind_Reason_Code
 unwind_phase2_forced(unw_context_t *uc, unw_cursor_t *cursor,
                      _Unwind_Exception *exception_object,
                      _Unwind_Stop_Fn stop, void *stop_parameter) {
+#if defined(_LIBUNWIND_PTRAUTH_ENABLED)
+  // An arm64e caller passes a signed stop function.
+  stop = __libunwind_auth_fn(_Unwind_Stop_Fn, stop);
+#endif
   __unw_init_local(cursor, uc);
 
   // Walk each frame until we reach where search phase said to stop
@@ -466,9 +471,11 @@ _LIBUNWIND_EXPORT void
 _Unwind_DeleteException(_Unwind_Exception *exception_object) {
   _LIBUNWIND_TRACE_API("_Unwind_DeleteException(ex_obj=%p)",
                        (void *)exception_object);
+  // An arm64e __cxa_throw stores a signed cleanup pointer.
   if (exception_object->exception_cleanup != NULL)
-    (*exception_object->exception_cleanup)(_URC_FOREIGN_EXCEPTION_CAUGHT,
-                                           exception_object);
+    (*__libunwind_auth_fn(__typeof__(exception_object->exception_cleanup),
+                          exception_object->exception_cleanup))(
+        _URC_FOREIGN_EXCEPTION_CAUGHT, exception_object);
 }
 
 /// Called by personality handler during phase 2 to get register values.
@@ -509,9 +516,25 @@ _LIBUNWIND_EXPORT uintptr_t _Unwind_GetIP(struct _Unwind_Context *context) {
 /// start executing in the landing pad.
 _LIBUNWIND_EXPORT void _Unwind_SetIP(struct _Unwind_Context *context,
                                      uintptr_t value) {
+  unw_cursor_t *cursor = (unw_cursor_t *)context;
+#if defined(_LIBUNWIND_PTRAUTH_ENABLED)
+  // The running personality is the cursor's handler (already authenticated by
+  // the step); a tail call would hide it from the caller's return address. The
+  // modifier is the SP the personality read with _Unwind_GetGR: the cursor's SP,
+  // before __unw_set_reg adjusts it for DW_CFA_GNU_args_size.
+  {
+    unw_proc_info_t info;
+    unw_word_t sp;
+    if (__unw_get_proc_info(cursor, &info) == UNW_ESUCCESS && info.handler &&
+        __unw_get_reg(cursor, UNW_REG_SP, &sp) == UNW_ESUCCESS)
+      value = __libunwind_auth_landing_pad(value, (uintptr_t)sp,
+                                           (uintptr_t)info.handler);
+  }
+#endif
+  // Traced after authentication, so the arm64e path logs the plain pad that is
+  // installed, not the signed value the personality passed in.
   _LIBUNWIND_TRACE_API("_Unwind_SetIP(context=%p, value=0x%0" PRIxPTR ")",
                        (void *)context, value);
-  unw_cursor_t *cursor = (unw_cursor_t *)context;
   __unw_set_reg(cursor, UNW_REG_IP, value);
 }
 

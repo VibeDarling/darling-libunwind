@@ -69,6 +69,7 @@ extern "C" _Unwind_Reason_Code __libunwind_seh_personality(
 #include "DwarfInstructions.hpp"
 #include "EHHeaderParser.hpp"
 #include "libunwind.h"
+#include "PtrAuth.h"
 #include "Registers.hpp"
 #include "RWMutex.hpp"
 #include "Unwind-EHABI.h"
@@ -1519,10 +1520,27 @@ bool UnwindCursor<A, R>::getInfoFromFdeCie(
     _info.end_ip            = fdeInfo.pcEnd;
     _info.lsda              = fdeInfo.lsda;
     _info.handler           = cieInfo.personality;
+#if defined(_LIBUNWIND_TARGET_AARCH64)
+    // Same GOT slot scheme as in the compact path (see there). A personality
+    // that is not read through a slot has an unknown scheme and is left as is.
+    if (_info.handler && cieInfo.personalitySlot && dso_base &&
+        R::getArch() == REGISTERS_ARM64 &&
+        __libunwind_image_is_arm64e(_addressSpace, dso_base))
+      _info.handler =
+          __libunwind_auth_ia(_info.handler, cieInfo.personalitySlot);
+#endif
     // Some frameless functions need SP altered when resuming in function, so
     // propagate spExtraArgSize.
     _info.gp                = prolog.spExtraArgSize;
     _info.flags             = 0;
+#if defined(_LIBUNWIND_TARGET_AARCH64)
+    // Frames of an arm64e image sign the return address they save, even though
+    // Apple's compilers emit no negate_ra_state CFI for Mach-O. The step decides
+    // per frame whether the return address was saved (see stepWithDwarf).
+    if (R::getArch() == REGISTERS_ARM64 && dso_base &&
+        __libunwind_image_is_arm64e(_addressSpace, dso_base))
+      _info.flags = _LIBUNWIND_RA_SIGNED_IB;
+#endif
     _info.format            = dwarfEncoding();
     _info.unwind_info       = fdeInfo.fdeStart;
     _info.unwind_info_size  = static_cast<uint32_t>(fdeInfo.fdeLength);
@@ -1824,6 +1842,13 @@ bool UnwindCursor<A, R>::getInfoFromCompactEncodingSection(pint_t pc,
         personalityIndex * sizeof(uint32_t));
     pint_t personalityPointer = sects.dso_base + (pint_t)personalityDelta;
     personality = _addressSpace.getP(personalityPointer);
+#if defined(_LIBUNWIND_TARGET_AARCH64)
+    // An arm64e image signs its GOT slots: IA key, address diversity,
+    // discriminator 0, so the modifier is the slot address.
+    if (personality && R::getArch() == REGISTERS_ARM64 &&
+        __libunwind_image_is_arm64e(_addressSpace, sects.dso_base))
+      personality = __libunwind_auth_ia(personality, personalityPointer);
+#endif
     if (log)
       fprintf(stderr, "getInfoFromCompactEncodingSection(pc=0x%llX), "
                       "personalityDelta=0x%08X, personality=0x%08llX\n",
@@ -1840,6 +1865,13 @@ bool UnwindCursor<A, R>::getInfoFromCompactEncodingSection(pint_t pc,
   _info.handler = personality;
   _info.gp = 0;
   _info.flags = 0;
+#if defined(_LIBUNWIND_TARGET_AARCH64)
+  // Every frame-based function of an arm64e image signs the return address it
+  // saves, with the IB key.
+  if (R::getArch() == REGISTERS_ARM64 &&
+      __libunwind_image_is_arm64e(_addressSpace, sects.dso_base))
+    _info.flags = _LIBUNWIND_RA_SIGNED_IB;
+#endif
   _info.format = encoding;
   _info.unwind_info = 0;
   _info.unwind_info_size = 0;
@@ -2044,8 +2076,13 @@ template <typename A, typename R>
 void UnwindCursor<A, R>::getInfo(unw_proc_info_t *info) {
   if (_unwindInfoMissing)
     memset(info, 0, sizeof(*info));
-  else
+  else {
     *info = _info;
+#if defined(_LIBUNWIND_TARGET_AARCH64)
+    // The return-address signing flags are internal to the unwinder.
+    info->flags &= ~_LIBUNWIND_RA_SIGNED_MASK;
+#endif
+  }
 }
 
 template <typename A, typename R>

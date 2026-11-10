@@ -160,6 +160,10 @@ int DwarfInstructions<A, R>::stepWithDwarf(A &addressSpace, pint_t pc,
   CIE_Info cieInfo;
   if (CFI_Parser<A>::decodeFDE(addressSpace, fdeStart, &fdeInfo,
                                &cieInfo) == NULL) {
+    // The return address column must exist in this target's register file.
+    // Checked at run time, before anything indexes a table with it.
+    if (static_cast<int>(cieInfo.returnAddressRegister) > R::lastDwarfRegNum())
+      return UNW_EBADFRAME;
     PrologInfo prolog;
     if (CFI_Parser<A>::parseFDEInstructions(addressSpace, fdeInfo, cieInfo, pc,
                                             R::getArch(), &prolog)) {
@@ -172,8 +176,6 @@ int DwarfInstructions<A, R>::stepWithDwarf(A &addressSpace, pint_t pc,
       const int lastReg = R::lastDwarfRegNum();
       assert(static_cast<int>(CFI_Parser<A>::kMaxRegisterNumber) >= lastReg &&
              "register range too large");
-      assert(lastReg >= (int)cieInfo.returnAddressRegister &&
-             "register range does not contain return address register");
       for (int i = 0; i <= lastReg; ++i) {
         if (prolog.savedRegisters[i].location !=
             CFI_Parser<A>::kRegisterUnused) {
@@ -205,27 +207,46 @@ int DwarfInstructions<A, R>::stepWithDwarf(A &addressSpace, pint_t pc,
 
 #if defined(_LIBUNWIND_TARGET_AARCH64)
       // If the target is aarch64 then the return address may have been signed
-      // using the v8.3 pointer authentication extensions. The original
-      // return address needs to be authenticated before the return address is
-      // restored. autia1716 is used instead of autia as autia1716 assembles
-      // to a NOP on pre-v8.3a architectures.
-      if ((R::getArch() == REGISTERS_ARM64) &&
-          prolog.savedRegisters[UNW_ARM64_RA_SIGN_STATE].value) {
+      // using the v8.3 pointer authentication extensions. It is authenticated
+      // by normalizeNewLinkRegister below, with the CFA as modifier (the CFA is
+      // already the new SP). procInfoFlags arrives holding the IB flag when the
+      // frame belongs to an arm64e image (set when the frame info was looked
+      // up, whether the compact encoding fell back to DWARF or not); the CFI
+      // then decides, per pc.
+      const unw_word_t imageFlags = procInfoFlags & _LIBUNWIND_RA_SIGNED_MASK;
+      procInfoFlags &= ~_LIBUNWIND_RA_SIGNED_MASK;
+      if (R::getArch() == REGISTERS_ARM64) {
+        const typename CFI_Parser<A>::RegisterLocation &raLoc =
+            prolog.savedRegisters[cieInfo.returnAddressRegister];
+        if (prolog.savedRegisters[UNW_ARM64_RA_SIGN_STATE].value) {
+          // The CFI says the return address is signed (negate_ra_state, as
+          // non-Mach-O compilers emit): key from the CIE.
 #if !defined(_LIBUNWIND_IS_NATIVE_ONLY)
-        return UNW_ECROSSRASIGNING;
+          return UNW_ECROSSRASIGNING;
 #else
-        register unsigned long long x17 __asm("x17") = returnAddress;
-        register unsigned long long x16 __asm("x16") = cfa;
-
-        // These are the autia1716/autib1716 instructions. The hint instructions
-        // are used here as gcc does not assemble autia1716/autib1716 for pre
-        // armv8.3a targets.
-        if (cieInfo.addressesSignedWithBKey)
-          asm("hint 0xe" : "+r"(x17) : "r"(x16)); // autib1716
-        else
-          asm("hint 0xc" : "+r"(x17) : "r"(x16)); // autia1716
-        returnAddress = x17;
+          procInfoFlags |= cieInfo.addressesSignedWithBKey
+                               ? _LIBUNWIND_RA_SIGNED_IB
+                               : _LIBUNWIND_RA_SIGNED_IA;
 #endif
+        } else if (imageFlags) {
+          // arm64e image, no negate_ra_state (Apple's compilers emit none for
+          // Mach-O). A return address that may come from memory is signed with
+          // the IB key; only rules that cannot read memory may skip it.
+          switch (raLoc.location) {
+          case CFI_Parser<A>::kRegisterUnused:       // not restored
+          case CFI_Parser<A>::kRegisterInRegister:   // copy of a register
+          case CFI_Parser<A>::kRegisterOffsetFromCFA: // CFA plus a constant
+            break;
+          case CFI_Parser<A>::kRegisterInCFA:        // load at CFA + offset
+          case CFI_Parser<A>::kRegisterAtExpression: // load at an expression
+          case CFI_Parser<A>::kRegisterIsExpression: // an expression, which may
+                                                     // dereference memory
+            procInfoFlags |= imageFlags;
+            break;
+          default:
+            return UNW_EBADFRAME; // signing state unknown: reject
+          }
+        }
       }
 #endif
 
