@@ -9,7 +9,9 @@
 // (__unw_is_arm64e_code, true for one function) are fakes. What stays guest-only:
 // the cursor holding the authenticated handler and the real image lookup, and
 // the whole throw path (ABI probe checks 03-10, 23, 28 on an arm64e libc++abi).
-// Needs pointer authentication; on hosts without it the test does nothing.
+// Needs pointer authentication. On arm64/LP64 a build without
+// __ARM_FEATURE_PAUTH is rejected at compile time, so a misconfigured CI cannot
+// stay green; on other hosts the test does nothing.
 //
 //   cc -march=armv8.3-a -fno-stack-protector -D_LIBUNWIND_IS_NATIVE_ONLY -I../src -I../include -c ../src/UnwindLevel1.c -o setip-auth-l1.o
 //   c++ -std=c++11 -march=armv8.3-a -D_LIBUNWIND_IS_NATIVE_ONLY -I../src -I../include setip-auth.pass.cpp setip-auth-l1.o
@@ -24,7 +26,10 @@
 #include "libunwind.h"
 #include "unwind.h"
 
-#if defined(__aarch64__) && defined(__LP64__) && defined(__ARM_FEATURE_PAUTH)
+#if defined(__aarch64__) && defined(__LP64__)
+#if !defined(__ARM_FEATURE_PAUTH)
+#error "setip-auth.pass.cpp needs pointer authentication: build with -march=armv8.3-a or newer"
+#endif
 #include <sys/auxv.h>
 
 static void arm64ePersonality() {}
@@ -33,6 +38,15 @@ static void landingPad() {}
 
 // What the fake cursor reports. Registers other than SP return a value that no
 // test signs with, so reading the wrong register shows.
+//
+// The cursor is a plain struct, and main reuses one object per personality
+// across installs: the fake is stateful. __unw_set_reg records the install but
+// deliberately does not adjust `sp` for DW_CFA_GNU_args_size, so this fake
+// cannot model that adjustment and cannot show whether authentication uses the
+// pre- or post-adjustment SP. That ordering is fixed by reading the signer
+// (libc++abi signs the pad with the SP read before the adjustment). Do not
+// "improve" the fake by mutating `sp` in __unw_set_reg: later probes reuse the
+// same objects and would then read the stale value.
 struct FakeCursor {
   bool haveInfo;
   uintptr_t handler;

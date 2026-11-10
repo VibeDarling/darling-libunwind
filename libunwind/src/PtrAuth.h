@@ -111,6 +111,14 @@ _LIBUNWIND_PTRAUTH_INLINE uintptr_t __libunwind_auth_function_ptr(uintptr_t ptr)
 // not be authenticated. The signer is the personality, so `personality` decides,
 // not the frame it unwinds. A pad that fails to authenticate stays poisoned and
 // faults when resumed; it is never stripped.
+//
+// Limitation: the personality classified here is the one in the FDE. A
+// plain-image wrapper personality that installs a pad signed by an inner arm64e
+// personality is classified plain, so the signed pad is installed unchanged and
+// the resume faults. That is fail-closed (the pad is never stripped), and it is
+// the same approximation used for function pointers; it stays broken for any
+// such frame. Telling the two apart needs scheme detection on the pad itself
+// (try IB, then plain), which is not possible without ambiguity today.
 _LIBUNWIND_PTRAUTH_INLINE uintptr_t __libunwind_auth_landing_pad(
     uintptr_t pad, uintptr_t sp, uintptr_t personality) {
   return (personality && __unw_is_arm64e_code(personality))

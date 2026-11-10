@@ -516,8 +516,6 @@ _LIBUNWIND_EXPORT uintptr_t _Unwind_GetIP(struct _Unwind_Context *context) {
 /// start executing in the landing pad.
 _LIBUNWIND_EXPORT void _Unwind_SetIP(struct _Unwind_Context *context,
                                      uintptr_t value) {
-  _LIBUNWIND_TRACE_API("_Unwind_SetIP(context=%p, value=0x%0" PRIxPTR ")",
-                       (void *)context, value);
   unw_cursor_t *cursor = (unw_cursor_t *)context;
 #if defined(_LIBUNWIND_PTRAUTH_ENABLED)
   // The running personality is the cursor's handler (already authenticated by
@@ -533,6 +531,10 @@ _LIBUNWIND_EXPORT void _Unwind_SetIP(struct _Unwind_Context *context,
                                            (uintptr_t)info.handler);
   }
 #endif
+  // Traced after authentication, so the arm64e path logs the plain pad that is
+  // installed, not the signed value the personality passed in.
+  _LIBUNWIND_TRACE_API("_Unwind_SetIP(context=%p, value=0x%0" PRIxPTR ")",
+                       (void *)context, value);
   __unw_set_reg(cursor, UNW_REG_IP, value);
 }
 
