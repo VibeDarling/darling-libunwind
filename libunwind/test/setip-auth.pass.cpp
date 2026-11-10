@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+// REQUIRES: (target=aarch64{{.*}} || target=arm64{{.*}}) && !windows
+// ADDITIONAL_COMPILE_FLAGS: -march=armv8.3-a
+
 // Host test of _Unwind_SetIP, the production function from UnwindLevel1.c linked
 // against a fake cursor: the personality of an arm64e image hands it a landing
 // pad signed with the return-address key (IB) and the SP of the frame that is
@@ -11,7 +14,11 @@
 // the whole throw path (ABI probe checks 03-10, 23, 28 on an arm64e libc++abi).
 // Needs pointer authentication. On arm64/LP64 a build without
 // __ARM_FEATURE_PAUTH is rejected at compile time, so a misconfigured CI cannot
-// stay green; on other hosts the test does nothing.
+// stay green; on other hosts the test does nothing. Lit runs this test only on
+// non-Windows arm64 targets (it uses POSIX fork/waitpid) and passes
+// -march=armv8.3-a through ADDITIONAL_COMPILE_FLAGS, which the libcxx test
+// format appends to %{compile_flags}; the same flag is required for the manual
+// build below.
 //
 //   cc -march=armv8.3-a -fno-stack-protector -D_LIBUNWIND_IS_NATIVE_ONLY -I../src -I../include -c ../src/UnwindLevel1.c -o setip-auth-l1.o
 //   c++ -std=c++11 -march=armv8.3-a -D_LIBUNWIND_IS_NATIVE_ONLY -I../src -I../include setip-auth.pass.cpp setip-auth-l1.o
