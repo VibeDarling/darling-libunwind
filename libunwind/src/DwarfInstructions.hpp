@@ -203,23 +203,38 @@ int DwarfInstructions<A, R>::stepWithDwarf(A &addressSpace, pint_t pc,
 
       isSignalFrame = cieInfo.isSignalFrame;
 
-      // The compact-unwind fallback may have flagged the frame as signed; here
-      // the CFI decides, per pc.
-      procInfoFlags &= ~_LIBUNWIND_RA_SIGNED_MASK;
 #if defined(_LIBUNWIND_TARGET_AARCH64)
       // If the target is aarch64 then the return address may have been signed
       // using the v8.3 pointer authentication extensions. It is authenticated
       // by normalizeNewLinkRegister below, with the CFA as modifier (the CFA is
-      // already the new SP) and the key the CIE names.
-      if ((R::getArch() == REGISTERS_ARM64) &&
-          prolog.savedRegisters[UNW_ARM64_RA_SIGN_STATE].value) {
+      // already the new SP). procInfoFlags arrives holding the IB flag when the
+      // frame belongs to an arm64e image (set when the frame info was looked
+      // up, whether the compact encoding fell back to DWARF or not); the CFI
+      // then decides, per pc.
+      const unw_word_t imageFlags = procInfoFlags & _LIBUNWIND_RA_SIGNED_MASK;
+      procInfoFlags &= ~_LIBUNWIND_RA_SIGNED_MASK;
+      if (R::getArch() == REGISTERS_ARM64) {
+        const typename CFI_Parser<A>::RegisterLocation &raLoc =
+            prolog.savedRegisters[cieInfo.returnAddressRegister];
+        if (prolog.savedRegisters[UNW_ARM64_RA_SIGN_STATE].value) {
+          // The CFI says the return address is signed (negate_ra_state, as
+          // non-Mach-O compilers emit): key from the CIE.
 #if !defined(_LIBUNWIND_IS_NATIVE_ONLY)
-        return UNW_ECROSSRASIGNING;
+          return UNW_ECROSSRASIGNING;
 #else
-        procInfoFlags |= cieInfo.addressesSignedWithBKey
-                             ? _LIBUNWIND_RA_SIGNED_IB
-                             : _LIBUNWIND_RA_SIGNED_IA;
+          procInfoFlags |= cieInfo.addressesSignedWithBKey
+                               ? _LIBUNWIND_RA_SIGNED_IB
+                               : _LIBUNWIND_RA_SIGNED_IA;
 #endif
+        } else if (imageFlags &&
+                   (raLoc.location == CFI_Parser<A>::kRegisterInCFA ||
+                    raLoc.location == CFI_Parser<A>::kRegisterAtExpression)) {
+          // arm64e image, no negate_ra_state (Apple's compilers emit none for
+          // Mach-O): a return address the frame saved to memory is signed with
+          // the IB key. A return address still in lr (a frame that never
+          // spilled it) is not.
+          procInfoFlags |= imageFlags;
+        }
       }
 #endif
 

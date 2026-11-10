@@ -1530,7 +1530,13 @@ bool UnwindCursor<A, R>::getInfoFromFdeCie(
     // Some frameless functions need SP altered when resuming in function, so
     // propagate spExtraArgSize.
     _info.gp                = prolog.spExtraArgSize;
-    _info.flags             = 0;
+    // Frames of an arm64e image sign the return address they save, even though
+    // Apple's compilers emit no negate_ra_state CFI for Mach-O. The step decides
+    // per frame whether the return address was saved (see stepWithDwarf).
+    _info.flags             = (R::getArch() == REGISTERS_ARM64 && dso_base &&
+                               __libunwind_image_is_arm64e(_addressSpace, dso_base))
+                                  ? _LIBUNWIND_RA_SIGNED_IB
+                                  : 0;
     _info.format            = dwarfEncoding();
     _info.unwind_info       = fdeInfo.fdeStart;
     _info.unwind_info_size  = static_cast<uint32_t>(fdeInfo.fdeLength);
