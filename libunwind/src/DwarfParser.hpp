@@ -345,7 +345,9 @@ const char *CFI_Parser<A>::parseCIE(A &addressSpace, pint_t cie,
   // parse return address register
   uint64_t raReg = (version == 1) ? addressSpace.get8(p++)
                                   : addressSpace.getULEB128(p, cieContentEnd);
-  assert(raReg < 255 && "return address register too large");
+  // Checked at run time: the value indexes the saved-register table.
+  if (raReg > kMaxRegisterNumber)
+    return "return address register out of range";
   cieInfo->returnAddressRegister = (uint8_t)raReg;
   // parse augmentation data based on augmentation string
   const char *result = NULL;

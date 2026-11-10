@@ -214,6 +214,9 @@ int DwarfInstructions<A, R>::stepWithDwarf(A &addressSpace, pint_t pc,
       const unw_word_t imageFlags = procInfoFlags & _LIBUNWIND_RA_SIGNED_MASK;
       procInfoFlags &= ~_LIBUNWIND_RA_SIGNED_MASK;
       if (R::getArch() == REGISTERS_ARM64) {
+        // parseCIE rejects this already; the table is indexed with it below.
+        if (cieInfo.returnAddressRegister > CFI_Parser<A>::kMaxRegisterNumber)
+          return UNW_EBADREG;
         const typename CFI_Parser<A>::RegisterLocation &raLoc =
             prolog.savedRegisters[cieInfo.returnAddressRegister];
         if (prolog.savedRegisters[UNW_ARM64_RA_SIGN_STATE].value) {
@@ -226,14 +229,24 @@ int DwarfInstructions<A, R>::stepWithDwarf(A &addressSpace, pint_t pc,
                                ? _LIBUNWIND_RA_SIGNED_IB
                                : _LIBUNWIND_RA_SIGNED_IA;
 #endif
-        } else if (imageFlags &&
-                   (raLoc.location == CFI_Parser<A>::kRegisterInCFA ||
-                    raLoc.location == CFI_Parser<A>::kRegisterAtExpression)) {
+        } else if (imageFlags) {
           // arm64e image, no negate_ra_state (Apple's compilers emit none for
-          // Mach-O): a return address the frame saved to memory is signed with
-          // the IB key. A return address still in lr (a frame that never
-          // spilled it) is not.
-          procInfoFlags |= imageFlags;
+          // Mach-O). A return address that may come from memory is signed with
+          // the IB key; only rules that cannot read memory may skip it.
+          switch (raLoc.location) {
+          case CFI_Parser<A>::kRegisterUnused:       // not restored
+          case CFI_Parser<A>::kRegisterInRegister:   // copy of a register
+          case CFI_Parser<A>::kRegisterOffsetFromCFA: // CFA plus a constant
+            break;
+          case CFI_Parser<A>::kRegisterInCFA:        // load at CFA + offset
+          case CFI_Parser<A>::kRegisterAtExpression: // load at an expression
+          case CFI_Parser<A>::kRegisterIsExpression: // an expression, which may
+                                                     // dereference memory
+            procInfoFlags |= imageFlags;
+            break;
+          default:
+            return UNW_EBADFRAME; // signing state unknown: reject
+          }
         }
       }
 #endif
