@@ -18,6 +18,7 @@
 #include "libunwind.h"
 #include "config.h"
 #include "libunwind_ext.h"
+#include "PtrAuth.h"
 
 
 namespace libunwind {
@@ -1826,8 +1827,13 @@ public:
 
   typedef uint64_t reg_t;
   void      normalizeNewLinkRegister(reg_t& linkRegister, unw_word_t procInfoFlags) {
-    (void)linkRegister;
-    (void)procInfoFlags;
+    // A return address saved by a signed frame is authenticated with the SP the
+    // frame had at entry, which is the SP after this step. A failed
+    // authentication leaves a non-canonical address that faults when used.
+    if (procInfoFlags & _LIBUNWIND_RA_SIGNED_IB)
+      linkRegister = __libunwind_auth_ib(linkRegister, getSP());
+    else if (procInfoFlags & _LIBUNWIND_RA_SIGNED_IA)
+      linkRegister = __libunwind_auth_ia(linkRegister, getSP());
   }
 
   void      normalizeExistingLinkRegister(reg_t& linkRegister) {

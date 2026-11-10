@@ -69,6 +69,7 @@ extern "C" _Unwind_Reason_Code __libunwind_seh_personality(
 #include "DwarfInstructions.hpp"
 #include "EHHeaderParser.hpp"
 #include "libunwind.h"
+#include "PtrAuth.h"
 #include "Registers.hpp"
 #include "RWMutex.hpp"
 #include "Unwind-EHABI.h"
@@ -1839,7 +1840,12 @@ bool UnwindCursor<A, R>::getInfoFromCompactEncodingSection(pint_t pc,
   _info.lsda = lsda;
   _info.handler = personality;
   _info.gp = 0;
-  _info.flags = 0;
+  // Every frame-based function of an arm64e image signs the return address it
+  // saves, with the IB key.
+  _info.flags = (R::getArch() == REGISTERS_ARM64 &&
+                 __libunwind_image_is_arm64e(_addressSpace, sects.dso_base))
+                    ? _LIBUNWIND_RA_SIGNED_IB
+                    : 0;
   _info.format = encoding;
   _info.unwind_info = 0;
   _info.unwind_info_size = 0;

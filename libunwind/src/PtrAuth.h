@@ -87,4 +87,18 @@ _LIBUNWIND_PTRAUTH_INLINE uintptr_t __libunwind_auth_ib(uintptr_t ptr,
 }
 #endif
 
+#ifdef __cplusplus
+// True when the Mach-O header at `base` is an arm64e image. The low 24 bits of
+// cpusubtype are the subtype (2 = arm64e); the top byte carries ABI flags.
+template <typename A>
+static inline bool __libunwind_image_is_arm64e(A &addressSpace,
+                                               uintptr_t base) {
+  const uint32_t MH_MAGIC_64 = 0xfeedfacf;
+  const uint32_t CPU_TYPE_ARM64 = 0x0100000c;
+  return addressSpace.get32(base) == MH_MAGIC_64 &&
+         addressSpace.get32(base + 4) == CPU_TYPE_ARM64 &&
+         (addressSpace.get32(base + 8) & 0x00ffffff) == 2;
+}
+#endif
+
 #endif // __PTRAUTH_H__

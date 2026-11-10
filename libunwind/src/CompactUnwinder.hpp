@@ -606,7 +606,9 @@ int CompactUnwinder_arm64<A>::stepWithCompactEncodingFrameless(
   // subtract stack size off of sp
   registers.setSP(savedRegisterLoc);
 
-  registers.normalizeNewLinkRegister(linkRegister, procInfoFlags);
+  // A frameless function never spills lr, so lr is still the register value and
+  // is not signed.
+  registers.normalizeNewLinkRegister(linkRegister, 0);
 
   // set pc to be value in lr
   registers.setIP(linkRegister);
